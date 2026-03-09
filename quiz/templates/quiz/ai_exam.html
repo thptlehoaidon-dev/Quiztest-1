@@ -1,0 +1,230 @@
+{% extends 'quiz/base.html' %}
+
+{% block title %}Tạo Đề Bằng AI{% endblock %}
+
+{% block content %}
+
+<!-- ✨ Loading Overlay -->
+<div id="ai-loading-overlay" style="display:none; position:fixed; inset:0; z-index:9999; background:linear-gradient(135deg,#1e1b4b 0%,#312e81 40%,#4c1d95 100%); align-items:center; justify-content:center; flex-direction:column;">
+    <style>
+        @keyframes spin-slow { to { transform: rotate(360deg); } }
+        @keyframes spin-reverse { to { transform: rotate(-360deg); } }
+        @keyframes pulse-ring {
+            0%   { transform: scale(0.8); opacity: 0.8; }
+            50%  { transform: scale(1.2); opacity: 0.3; }
+            100% { transform: scale(0.8); opacity: 0.8; }
+        }
+        @keyframes float-dot {
+            0%, 100% { transform: translateY(0); }
+            50%       { transform: translateY(-10px); }
+        }
+        @keyframes fade-status {
+            0%   { opacity: 0; transform: translateY(6px); }
+            20%  { opacity: 1; transform: translateY(0); }
+            80%  { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-6px); }
+        }
+        .ai-ring-outer {
+            width: 110px; height: 110px;
+            border: 4px solid rgba(167,139,250,0.25);
+            border-top-color: #a78bfa;
+            border-radius: 50%;
+            animation: spin-slow 1.2s linear infinite;
+        }
+        .ai-ring-inner {
+            position: absolute;
+            width: 76px; height: 76px;
+            border: 4px solid rgba(216,180,254,0.2);
+            border-bottom-color: #d8b4fe;
+            border-radius: 50%;
+            animation: spin-reverse 0.9s linear infinite;
+        }
+        .ai-pulse {
+            position: absolute;
+            width: 110px; height: 110px;
+            border-radius: 50%;
+            background: rgba(139,92,246,0.15);
+            animation: pulse-ring 2s ease-in-out infinite;
+        }
+        .ai-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #c4b5fd;
+            animation: float-dot 1.2s ease-in-out infinite;
+        }
+        .ai-dot:nth-child(2) { animation-delay: 0.2s; background: #a78bfa; }
+        .ai-dot:nth-child(3) { animation-delay: 0.4s; background: #7c3aed; }
+        #ai-status-text {
+            animation: fade-status 2.5s ease-in-out infinite;
+        }
+    </style>
+
+    <!-- Spinner -->
+    <div style="position:relative; width:110px; height:110px; display:flex; align-items:center; justify-content:center; margin-bottom:32px;">
+        <div class="ai-pulse"></div>
+        <div class="ai-ring-outer"></div>
+        <div class="ai-ring-inner"></div>
+        <span style="position:absolute; font-size:28px;">🤖</span>
+    </div>
+
+    <!-- Title -->
+    <p style="color:#ede9fe; font-size:22px; font-weight:700; margin-bottom:8px; letter-spacing:0.02em;">AI đang tạo đề thi…</p>
+    <p style="color:#a78bfa; font-size:14px; margin-bottom:28px;">Vui lòng đợi, quá trình này có thể mất vài giây</p>
+
+    <!-- Status messages -->
+    <div style="height:24px; overflow:hidden; margin-bottom:32px;">
+        <p id="ai-status-text" style="color:#c4b5fd; font-size:13px; text-align:center;"></p>
+    </div>
+
+    <!-- Dots -->
+    <div style="display:flex; gap:10px;">
+        <div class="ai-dot"></div>
+        <div class="ai-dot"></div>
+        <div class="ai-dot"></div>
+    </div>
+</div>
+
+<div class="max-w-xl mx-auto">
+    <!-- Header -->
+    <div class="mb-6 flex items-center gap-3">
+        <a href="{% url 'quiz:dashboard' %}" class="text-gray-400 hover:text-gray-600 transition-colors">
+            <i class="fas fa-arrow-left text-lg"></i>
+        </a>
+        <div>
+            <h1 class="text-2xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
+                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-purple-100 text-purple-600">
+                    <i class="fas fa-robot text-sm"></i>
+                </span>
+                Tạo Đề Thi Bằng AI
+            </h1>
+            <p class="text-sm text-gray-500 mt-0.5">Nhập chủ đề và để AI tự động tạo bộ câu hỏi cho bạn</p>
+        </div>
+    </div>
+
+    {% if messages %}
+    <div class="mb-4">
+        {% for message in messages %}
+        <div class="p-4 rounded-lg mb-2
+            {% if message.tags == 'error' %}bg-red-50 text-red-700 border border-red-200
+            {% elif message.tags == 'success' %}bg-green-50 text-green-700 border border-green-200
+            {% else %}bg-blue-50 text-blue-700 border border-blue-200{% endif %}">
+            <i class="fas fa-info-circle mr-2"></i>{{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Form -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+        <form id="ai-exam-form" method="POST" class="space-y-6">
+            {% csrf_token %}
+
+            <!-- Tên đề thi -->
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">
+                    <i class="fas fa-heading text-purple-500 mr-1"></i> Tên đề thi
+                </label>
+                <input type="text" name="title" placeholder="VD: Đề thi Vật Lý lớp 10" required
+                    class="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition">
+            </div>
+
+            <!-- Chủ đề / mô tả yêu cầu -->
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">
+                    <i class="fas fa-lightbulb text-purple-500 mr-1"></i> Chủ đề / Yêu cầu cho AI
+                </label>
+                <textarea name="prompt" rows="4" required
+                    placeholder="VD: Tạo 5 câu hỏi trắc nghiệm về định luật Newton, mỗi câu có 4 đáp án, 1 đáp án đúng."
+                    class="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition resize-none"></textarea>
+            </div>
+
+            <!-- Số câu hỏi -->
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">
+                    <i class="fas fa-list-ol text-purple-500 mr-1"></i> Số câu hỏi
+                </label>
+                <input type="number" name="num_questions" value="5" min="1" max="50"
+                    class="w-40 border border-gray-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition">
+            </div>
+
+            <!-- Buttons -->
+            <div class="flex gap-3 pt-2">
+                <button type="submit" id="ai-submit-btn"
+                    class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-200 flex items-center justify-center gap-2">
+                    <i class="fas fa-magic"></i> Tạo Đề Bằng AI
+                </button>
+                <a href="{% url 'quiz:dashboard' %}"
+                    class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2">
+                    <i class="fas fa-times"></i> Huỷ
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Hướng dẫn -->
+    <div class="mt-6 bg-gray-900 rounded-xl p-6 text-sm">
+        <p class="text-gray-400 font-semibold mb-3">
+            <i class="fas fa-code text-purple-400 mr-1"></i> Hướng dẫn tích hợp AI:
+        </p>
+        <pre class="text-green-400 overflow-x-auto leading-relaxed"><code># views.py — hàm ai_exam(), phần POST:
+
+import openai  # hoặc google.generativeai
+
+def ai_exam(request):
+    if request.method == 'POST':
+        prompt = request.POST.get('prompt')
+        num    = request.POST.get('num_questions', 5)
+
+        # 1. Gọi AI API với prompt
+        # response = openai.chat.completions.create(...)
+
+        # 2. Parse JSON trả về thành list câu hỏi
+
+        # 3. Lưu Exam / Question / Choice vào DB
+
+        # 4. Redirect về dashboard
+        pass</code></pre>
+    </div>
+</div>
+
+<script>
+(function () {
+    const statusMessages = [
+        '🔍 Đang phân tích chủ đề...',
+        '✍️ Đang soạn câu hỏi...',
+        '📚 Đang kiểm tra nội dung...',
+        '🎯 Đang chọn đáp án phù hợp...',
+        '🧠 AI đang suy nghĩ...',
+        '⚡ Sắp xong rồi, chờ tý...',
+        '📝 Đang hoàn thiện đề thi...',
+    ];
+
+    const overlay  = document.getElementById('ai-loading-overlay');
+    const statusEl = document.getElementById('ai-status-text');
+    const form     = document.getElementById('ai-exam-form');
+
+    let msgIndex = 0;
+    let interval;
+
+    function cycleStatus() {
+        statusEl.style.animation = 'none';
+        void statusEl.offsetWidth; // reflow
+        statusEl.style.animation  = 'fade-status 2.5s ease-in-out infinite';
+        statusEl.textContent = statusMessages[msgIndex % statusMessages.length];
+        msgIndex++;
+    }
+
+    form.addEventListener('submit', function (e) {
+        // Validate manually so we only show overlay when form is truly valid
+        if (!form.checkValidity()) return;
+
+        overlay.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+
+        cycleStatus();
+        interval = setInterval(cycleStatus, 2500);
+    });
+})();
+</script>
+
+{% endblock %}

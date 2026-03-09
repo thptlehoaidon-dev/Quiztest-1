@@ -10,6 +10,10 @@
             class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 transform hover:-translate-y-0.5 flex items-center gap-2">
             <i class="fas fa-file-import"></i> Import JSON
         </a>
+        <a href="{% url 'quiz:ai_exam' %}"
+            class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 transform hover:-translate-y-0.5 flex items-center gap-2">
+            <i class="fas fa-robot"></i> Tạo Đề Bằng AI
+        </a>
         <a href="{% url 'quiz:add_exam' %}"
             class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 transform hover:-translate-y-0.5 flex items-center gap-2">
             <i class="fas fa-plus-circle"></i> Tạo Đề Thi
@@ -37,8 +41,7 @@
             <p class="text-gray-500 text-sm line-clamp-2">{{ exam.description|default:"Không có mô tả" }}</p>
 
             <div class="mt-4 flex items-center gap-3 text-sm text-gray-600 font-medium bg-gray-50 p-3 rounded-lg">
-                <div class="flex items-center gap-1.5"><i class="fas fa-list-ol text-blue-500"></i> {{
-                    exam.questions.count }} câu hỏi</div>
+                <div class="flex items-center gap-1.5"><i class="fas fa-list-ol text-blue-500"></i> {{ exam.questions.count }} câu hỏi</div>
             </div>
         </div>
 

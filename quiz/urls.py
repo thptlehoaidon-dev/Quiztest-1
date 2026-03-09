@@ -10,4 +10,5 @@ urlpatterns = [
     path('result/<int:exam_id>/<int:score>/<int:total>/', views.exam_result, name='exam_result'),
     path('delete/<int:exam_id>/', views.delete_exam, name='delete_exam'),
     path('import-json/', views.import_json, name='import_json'),
+    path('ai-exam/', views.ai_exam, name='ai_exam'),
 ]

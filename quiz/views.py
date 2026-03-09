@@ -1,6 +1,10 @@
+import json
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
+from django.db import transaction
 from .models import Exam, Question, Choice
+import google.generativeai as genai
+import re
 
 def dashboard(request):
     exams = Exam.objects.all().order_by('-created_at')
@@ -72,34 +76,187 @@ def delete_exam(request, exam_id):
     return redirect('quiz:dashboard')
 
 def import_json(request):
-    """
-    TODO: Tự code logic xử lý import đề từ file JSON tại đây.
-    
-    Gợi ý cấu trúc JSON:
-    {
-        "title": "Tên đề thi",
-        "description": "Mô tả",
-        "questions": [
-            {
-                "text": "Nội dung câu hỏi",
-                "choices": [
-                    {"text": "Đáp án A", "is_correct": false},
-                    {"text": "Đáp án B", "is_correct": true},
-                    {"text": "Đáp án C", "is_correct": false},
-                    {"text": "Đáp án D", "is_correct": false}
-                ]
-            }
-        ]
-    }
-    """
     if request.method == 'POST':
         json_file = request.FILES.get('json_file')
+
+        # --- Kiểm tra file được chọn ---
         if not json_file:
             messages.error(request, 'Vui lòng chọn file JSON.')
             return redirect('quiz:import_json')
 
-        # TODO: Xử lý file JSON tại đây
-        messages.info(request, 'Tính năng đang được phát triển...')
+        if not json_file.name.lower().endswith('.json'):
+            messages.error(request, 'File không hợp lệ. Vui lòng chọn file có đuôi .json')
+            return redirect('quiz:import_json')
+
+        # --- Đọc & parse JSON ---
+        try:
+            raw = json_file.read().decode('utf-8')
+            data = json.loads(raw)
+        except UnicodeDecodeError:
+            messages.error(request, 'Không thể đọc file. Hãy đảm bảo file được lưu với encoding UTF-8.')
+            return redirect('quiz:import_json')
+        except json.JSONDecodeError as e:
+            messages.error(request, f'File JSON không đúng định dạng: {e}')
+            return redirect('quiz:import_json')
+
+        # --- Kiểm tra cấu trúc ---
+        title = data.get('title', '').strip() if isinstance(data, dict) else ''
+        if not title:
+            messages.error(request, 'File JSON thiếu trường "title" (tên đề thi).')
+            return redirect('quiz:import_json')
+
+        questions_data = data.get('questions', [])
+        if not questions_data or not isinstance(questions_data, list):
+            messages.error(request, 'File JSON thiếu hoặc có trường "questions" rỗng.')
+            return redirect('quiz:import_json')
+
+        # --- Lưu vào database (atomic transaction) ---
+        try:
+            with transaction.atomic():
+                exam = Exam.objects.create(
+                    title=title,
+                    description=data.get('description', '').strip(),
+                )
+
+                question_count = 0
+                for order, q_data in enumerate(questions_data, start=1):
+                    if not isinstance(q_data, dict):
+                        continue
+                    q_text = q_data.get('text', '').strip()
+                    if not q_text:
+                        continue
+
+                    question = Question.objects.create(
+                        exam=exam,
+                        text=q_text,
+                        order=order,
+                    )
+
+                    for c_data in q_data.get('choices', []):
+                        if not isinstance(c_data, dict):
+                            continue
+                        c_text = c_data.get('text', '').strip()
+                        if not c_text:
+                            continue
+                        Choice.objects.create(
+                            question=question,
+                            text=c_text,
+                            is_correct=bool(c_data.get('is_correct', False)),
+                        )
+
+                    question_count += 1
+
+        except Exception as e:
+            messages.error(request, f'Đã xảy ra lỗi khi lưu đề thi: {e}')
+            return redirect('quiz:import_json')
+
+        messages.success(
+            request,
+            f'Import thành công đề {exam.title} với {question_count} câu hỏi!'
+        )
         return redirect('quiz:dashboard')
 
     return render(request, 'quiz/import_json.html')
+
+def ai_exam(request):
+    genai.configure(api_key="AIzaSyCrQoFRNRAF1GUOgkEEqPpGqCHVAwDe5t0")
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    if request.method == 'POST':
+        prompt = request.POST.get('prompt')
+        num_questions = request.POST.get('num_questions',4)
+        title = request.POST.get('title')
+
+        prompt_AI = f"""
+        Bạn là một giáo viên giỏi, có khả năng tạo ra các câu hỏi trắc nghiệm chất lượng cao.
+        Hãy tạo cho tôi {num_questions} câu hỏi trắc nghiệm dựa trên chủ đề sau:
+        {prompt}
+        
+        Yêu cầu:
+        - Mỗi câu hỏi có 4 đáp án.
+        - Chỉ có 1 đáp án đúng.
+        - Viết các công thức không dùng LaTex
+        - Đáp án đúng được đánh dấu là "is_correct": true.
+        - Các đáp án sai được đánh dấu là "is_correct": false.
+        - Trả về kết quả dưới dạng JSON hợp lệ với cấu trúc sau:
+        {{
+            "description": "Mô tả đề thi",
+            "questions": [
+                {{
+                    "text": "Nội dung câu hỏi",
+                    "choices": [
+                        {{"text": "Đáp án 1", "is_correct": false}},
+                        {{"text": "Đáp án 2", "is_correct": true}},
+                        {{"text": "Đáp án 3", "is_correct": false}},
+                        {{"text": "Đáp án 4", "is_correct": false}}
+                    ]
+                }}
+            ]
+        }}
+        """
+
+        response = model.generate_content(prompt_AI)
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            messages.error(request, f'AI trả về sai định dạng JSON: {e}')
+
+            print(raw);
+            print(data.text);
+
+            return redirect('quiz:ai_exam')
+
+        try:
+            with transaction.atomic():
+                exam = Exam.objects.create(
+                    title=title,
+                    description=data.get('description', '').strip(),
+                )
+
+                question_count = 0
+                for order, q_data in enumerate(data.get('questions', []), start=1):
+                    if not isinstance(q_data, dict):
+                        continue
+                    q_text = q_data.get('text', '').strip()
+                    if not q_text:
+                        continue
+
+                    question = Question.objects.create(
+                        exam=exam,
+                        text=q_text,
+                        order=order,
+                    )
+
+                    for c_data in q_data.get('choices', []):
+                        if not isinstance(c_data, dict):
+                            continue
+                        c_text = c_data.get('text', '').strip()
+                        if not c_text:
+                            continue
+                        Choice.objects.create(
+                            question=question,
+                            text=c_text,
+                            is_correct=bool(c_data.get('is_correct', False)),
+                        )
+
+                    question_count += 1
+
+        except Exception as e:
+            messages.error(request, f'Đã xảy ra lỗi khi lưu đề thi: {e}')
+            return redirect('quiz:ai_exam')
+
+        messages.success(
+            request,
+            f'Import thành công đề {exam.title} với {question_count} câu hỏi!'
+        )
+        
+        return redirect('quiz:dashboard')
+
+    return render(request, 'quiz/ai_exam.html')
